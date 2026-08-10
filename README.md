@@ -135,7 +135,10 @@ python scripts/cli.py publish \
 python scripts/cli.py publish-video \
   --title-file title.txt \
   --content-file content.txt \
-  --video "/abs/path/video.mp4"
+  --video "/abs/path/video.mp4" \
+  --cover "/abs/path/cover.png"
+
+视频预发布只有限检查编辑器是否出现，不等待不可靠的上传完成回调。标题框出现后即可继续填写；发布按钮尚不可用时保留当前页面，稍后重试确认发布，不要重复上传视频。
 
 # 点赞 / 收藏 / 评论
 python scripts/cli.py like-feed --feed-id FEED_ID --xsec-token XSEC_TOKEN

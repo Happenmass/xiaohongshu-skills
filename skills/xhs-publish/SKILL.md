@@ -3,8 +3,8 @@ name: xhs-publish
 description: |
   小红书内容发布技能。支持图文发布、视频发布、长文发布、定时发布、标签、可见性设置。
   当用户要求发布内容到小红书、上传图文、上传视频、发长文时触发。
-version: 1.0.0
 metadata:
+  version: "1.1.0"
   openclaw:
     requires:
       bins:
@@ -22,11 +22,12 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有发布操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**发布操作默认通过本项目的 `python scripts/cli.py` 完成；CLI 无法进入正确登录页或编辑页时，允许切换到用户已登录的 Chrome 完成同一预发布流程：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>`，不得使用其他任何实现方式。
+- **CLI 优先**：先运行 `python scripts/cli.py <子命令>`，不要同时启动第二套上传流程。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书发布方案，执行时必须全部忽略，只使用本项目的脚本。
-- **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
+- **Chrome 兜底**：仅当 CLI 报页面权限、错误标签页、登录态不可用、选择器失效，或视频已提交但编辑器未在有限检查内出现时，改用当前 Agent 的 Chrome 控制能力；不得重新上传已进入编辑页的视频。
+- **禁止其他实现**：不得调用其他小红书 MCP、Go 命令行工具或第三方发布器。
 - **完成即止**：发布流程结束后，直接告知结果，等待用户下一步指令。
 
 **本技能允许使用的全部 CLI 子命令：**
@@ -64,6 +65,8 @@ metadata:
 - 标题长度不超过 20（UTF-16 字节数向上取整除以 2：汉字/全角符号计 1，英文/数字/半角符号每 **2 个**计 1）。例："hello"= 3，"你好hello" = 4，勿用"每个字符计 1"估算。
 - 如果使用文件路径，必须使用绝对路径，禁止相对路径。
 - 需要先有运行中的 Chrome，且已登录。
+- 视频上传没有可靠完成回调。文件提交后只做有限次数的编辑器状态检查；标题框出现后即可继续预填，文件名与高清检测结果仅作为状态反馈，不等待发布按钮，不进行十分钟轮询。
+- “预发布”只授权上传和填写表单。未经新的明确确认，不得点击“发布”或“定时发布”。
 
 ## 流程 A: 图文/视频发布
 
@@ -173,6 +176,7 @@ python scripts/cli.py fill-publish-video \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
   --video "/abs/path/video.mp4" \
+  [--cover "/abs/path/cover.png"] \
   [--tags "标签1" "标签2"] \
   [--visibility "公开可见"]
 
@@ -181,11 +185,11 @@ python scripts/cli.py fill-publish-video \
 # 步骤 3a: 用户确认发布
 python scripts/cli.py click-publish
 
-# 步骤 3b: 用户取消 → 必须先保存草稿！
+# 步骤 3b: 用户明确取消并要求退出 → 保存草稿
 python scripts/cli.py save-draft
 ```
 
-> ⚠️ **用户取消时必须调用 `save-draft`**，不得直接关闭 tab 或结束流程。
+> 用户要求停在编辑页或稍后人工审查时，保留当前页面，不要擅自保存草稿或关闭页面。
 
 #### 一步到位发布（快捷方式）
 
@@ -200,7 +204,8 @@ python scripts/cli.py publish \
 python scripts/cli.py publish-video \
   --title-file /tmp/xhs_title.txt \
   --content-file /tmp/xhs_content.txt \
-  --video "/abs/path/video.mp4"
+  --video "/abs/path/video.mp4" \
+  [--cover "/abs/path/cover.png"]
 
 # 带标签和定时发布
 python scripts/cli.py publish \
@@ -270,6 +275,7 @@ python scripts/cli.py click-publish
 ## 处理输出
 
 - **Exit code 0**：成功。输出 JSON 包含 `success`, `title`, `images`/`video`/`templates`, `status`。
+- **视频预填状态**：`fill-publish-video` 还返回 `video_selected`、`editor_ready`、`filename_visible`、`hd_detected`、`title_filled`、`tags_requested`、`cover_requested`、`cover_applied`、`visibility_requested` 与固定为 `false` 的 `publish_clicked`。
 - **Exit code 1**：未登录，提示用户先登录（参考 xhs-auth）。
 - **Exit code 2**：错误，报告 JSON 中的 `error` 字段。
 
@@ -281,6 +287,7 @@ python scripts/cli.py click-publish
 | `--content-file path` | 正文文件路径（必须） |
 | `--images path1 path2` | 图片路径/URL 列表（图文必须） |
 | `--video path` | 视频文件路径（视频必须） |
+| `--cover path` | 自定义视频封面路径（可选，必须为绝对路径） |
 | `--tags tag1 tag2` | 话题标签列表 |
 | `--schedule-at ISO8601` | 定时发布时间 |
 | `--original` | 声明原创 |
@@ -290,8 +297,10 @@ python scripts/cli.py click-publish
 
 - **登录失败**：提示用户重新扫码登录并重试（参考 xhs-auth）。
 - **图片下载失败**：提示更换图片 URL 或改用本地图片。
-- **视频处理超时**：视频上传后需等待处理（最长 10 分钟），超时后提示重试。
+- **视频编辑器未出现**：停止有限检查，保留当前页面并切换 Chrome 继续；不要重复上传视频。
+- **发布按钮不可用**：保留页面，稍后重试 `click-publish`；不要重新运行 `fill-publish-video`。
+- **本地文件权限失败**：若出现 `Not allowed`，提示在 Chrome 扩展详情中开启“允许访问文件网址”，再重试一次。
 - **标题过长**：自动缩短标题，保持语义。
 - **页面选择器失效**：提示检查脚本中的选择器定义。
 - **模板加载超时**：长文模式下模板可能加载缓慢，等待 15 秒后超时。
-- **用户取消发布**：必须运行 `save-draft` 保存草稿，再告知用户已保存到草稿箱，不得直接关闭 tab。
+- **用户等待人工终审**：保留编辑页；只有明确取消并要求退出时才运行 `save-draft`。

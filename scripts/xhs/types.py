@@ -437,6 +437,7 @@ class PublishVideoContent:
     content: str = ""
     tags: list[str] = field(default_factory=list)
     video_path: str = ""
+    cover_path: str = ""
     schedule_time: str | None = None  # ISO8601 格式
     visibility: str = ""  # 公开可见(默认)|仅自己可见|仅互关好友可见
 

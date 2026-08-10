@@ -51,6 +51,11 @@ CONTENT_EDITOR = "div.ql-editor"
 IMAGE_PREVIEW = ".img-preview-area .pr"
 PUBLISH_BUTTON = ".publish-page-publish-btn button.bg-red"
 
+# 视频编辑页
+VIDEO_COVER_OPEN = ".cover .default.column"
+VIDEO_COVER_UPLOAD_BUTTON = ".upload-btn"
+VIDEO_COVER_FILE_INPUT = 'input[type="file"][accept*="image"]'
+
 # 标题/正文长度校验
 TITLE_MAX_SUFFIX = "div.title-container div.max_suffix"
 CONTENT_LENGTH_ERROR = "div.edit-container div.length-error"

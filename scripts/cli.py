@@ -597,18 +597,28 @@ def cmd_fill_publish_video(args: argparse.Namespace) -> None:
 
     browser, page = _connect(args)
     try:
-        fill_publish_video_form(
+        prefill_state = fill_publish_video_form(
             page,
             PublishVideoContent(
                 title=title,
                 content=content,
                 tags=args.tags or [],
                 video_path=args.video,
+                cover_path=args.cover or "",
                 schedule_time=args.schedule_at,
                 visibility=args.visibility or "",
             ),
         )
-        _output({"success": True, "title": title, "video": args.video, "status": "视频表单已填写，等待确认发布"})
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "video": args.video,
+                "cover": args.cover,
+                **prefill_state,
+                "status": "视频表单已填写，等待确认发布",
+            }
+        )
     finally:
         browser.close()
 
@@ -817,6 +827,7 @@ def cmd_publish_video(args: argparse.Namespace) -> None:
                 content=content,
                 tags=args.tags or [],
                 video_path=args.video,
+                cover_path=args.cover or "",
                 schedule_time=args.schedule_at,
                 visibility=args.visibility or "",
             ),
@@ -957,6 +968,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--title-file", required=True)
     sub.add_argument("--content-file", required=True)
     sub.add_argument("--video", required=True)
+    sub.add_argument("--cover")
     sub.add_argument("--tags", nargs="*")
     sub.add_argument("--schedule-at")
     sub.add_argument("--visibility")
@@ -978,6 +990,7 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_argument("--title-file", required=True)
     sub.add_argument("--content-file", required=True)
     sub.add_argument("--video", required=True)
+    sub.add_argument("--cover")
     sub.add_argument("--tags", nargs="*")
     sub.add_argument("--schedule-at")
     sub.add_argument("--visibility")
