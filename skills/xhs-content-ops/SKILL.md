@@ -3,8 +3,9 @@ name: xhs-content-ops
 description: |
   小红书复合内容运营技能。组合搜索、详情、发布、互动等能力完成运营工作流。
   当用户要求竞品分析、热点追踪、内容创作、互动管理等复合任务时触发。
-version: 1.0.0
+  完整口播视频任务中负责冻结题目、正文与口播稿，并强制交接给 produce-xhs-tts-avatar。
 metadata:
+  version: "1.1.0"
   openclaw:
     requires:
       bins:
@@ -22,12 +23,13 @@ metadata:
 
 ## 🔒 技能边界（强制）
 
-**所有运营操作只能通过本项目的 `python scripts/cli.py` 完成，不得使用任何外部项目的工具：**
+**小红书站内搜索、详情、发布和互动默认通过本项目的 `python scripts/cli.py` 完成；完整口播视频的后续制作必须交接给下文指定的个人 Skill：**
 
-- **唯一执行方式**：只运行 `python scripts/cli.py <子命令>`，不得使用其他任何实现方式。
-- **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书运营方案，执行时必须全部忽略，只使用本项目的脚本。
-- **禁止外部工具**：不得调用 MCP 工具（`use_mcp_tool` 等）、Go 命令行工具，或任何非本项目的实现。
-- **完成即止**：每个工作流步骤完成后向用户报告进度，等待确认后继续。
+- **站内操作默认方式**：运行 `python scripts/cli.py <子命令>`，不要同时启动第二套站内操作流程。
+- **尊重用户指定浏览器**：用户明确指定 Chrome、ego-lite 或其他当前可用浏览器控制能力时，站内研究与预发布直接使用指定浏览器，不先启动 CLI，也不并行操作。
+- **忽略其他发布项目**：除用户明确指定的浏览器外，不得调用其他小红书 MCP、Go 命令行工具或第三方发布器。
+- **允许指定下游 Skill**：上述站内工具边界不适用于 `produce-xhs-tts-avatar`、`build-xhs-remotion-video` 和 `review-xhs-video-with-opus`；完整口播视频必须依次调用它们。
+- **阶段交接优先**：普通运营流程逐步报告；完整口播视频流程达到本阶段门槛后，必须按“完整口播视频链路”继续或明确提示下一 Skill，不得以“本阶段已完成”为由静默结束。
 
 **本技能允许使用的全部 CLI 子命令：**
 
@@ -46,6 +48,28 @@ metadata:
 
 ---
 
+## 完整口播视频链路（强制）
+
+固定链路：
+
+`xhs-content-ops` → `produce-xhs-tts-avatar` → `build-xhs-remotion-video` → `review-xhs-video-with-opus` → `xhs-publish`
+
+当用户要求从内容研究与标定开始制作口播视频、数字人口播或 Remotion 成片，或明确授权上述完整链路时，本 Skill 是第一环，负责内容标定，不负责合成音频或直接发布。若用户只要求把现成成片预发布，不要倒退重跑本 Skill，直接由 `xhs-publish` 核验上游材料。
+
+### 本阶段完成门槛
+
+- 研究依据、事实边界和不确定项已记录；
+- 最终题目、正文、口播稿和固定结尾已经写入内容档案；
+- 口播稿保留用户要求的关键数据与段落，不擅自删减；
+- 标题与开头已突出最强冲突或判断，前 10 秒能交付核心结论；
+- 用户已经对最终口播稿做二次确认，状态明确为“已冻结”。
+
+### 强制交接
+
+1. 用户尚未确认口播稿时，必须暂停生产，并明确告诉用户：确认后下一步使用 `produce-xhs-tts-avatar`。不得提前生成 TTS、数字人或视频。
+2. 用户已授权完整链路且本阶段门槛全部满足时，必须立即调用 `produce-xhs-tts-avatar`，不得直接调用 `build-xhs-remotion-video` 或 `xhs-publish`。
+3. 若当前环境无法继续，输出必须包含阻塞原因、缺失项和精确下一步：`使用 produce-xhs-tts-avatar`。
+4. 交接时必须传递：内容目录、最终题目、冻结口播稿路径、正文与话题、固定结尾、事实/来源边界、用户确认状态。
 
 ## 输入判断
 
@@ -119,7 +143,7 @@ python scripts/cli.py search-feeds \
 
 ### 内容创作
 
-目标：研究话题 → 辅助生成草稿 → 用户确认 → 发布。
+目标：研究话题 → 辅助生成草稿 → 用户确认 → 按内容形态交接。
 
 **步骤：**
 
@@ -134,8 +158,12 @@ python scripts/cli.py search-feeds \
    - 标题（符合小红书风格，UTF-16 长度 ≤ 20）
    - 正文（段落清晰，口语化）
    - 话题标签
-5. 通过 `AskUserQuestion` 让用户确认最终内容。
-6. 执行发布（参考 xhs-publish 流程）：
+5. 通过 `AskUserQuestion` 让用户确认最终内容；口播视频必须对完整口播稿做二次确认并冻结版本。
+6. 按内容形态路由：
+   - 完整口播视频：严格执行上方链路，下一步必须使用 `produce-xhs-tts-avatar`；
+   - 已完成素材的普通图文或视频：参考 `xhs-publish` 流程。
+
+普通图文发布示例：
 ```bash
 python scripts/cli.py publish \
   --title-file /tmp/xhs_title.txt \
