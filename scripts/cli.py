@@ -568,7 +568,7 @@ def cmd_fill_publish(args: argparse.Namespace) -> None:
 
     browser, page = _connect(args)
     try:
-        fill_publish_form(
+        prefill_state = fill_publish_form(
             page,
             PublishImageContent(
                 title=title,
@@ -580,7 +580,15 @@ def cmd_fill_publish(args: argparse.Namespace) -> None:
                 visibility=args.visibility or "",
             ),
         )
-        _output({"success": True, "title": title, "images": len(image_paths), "status": "表单已填写，等待确认发布"})
+        _output(
+            {
+                "success": True,
+                "title": title,
+                "images": len(image_paths),
+                **prefill_state,
+                "status": "表单已填写，话题已关联，等待确认发布",
+            }
+        )
     finally:
         browser.close()
 

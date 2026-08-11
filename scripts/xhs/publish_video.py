@@ -11,6 +11,7 @@ from .cdp import Page
 from .errors import PublishError, UploadTimeoutError
 from .publish import (
     _click_publish_tab,
+    _extract_hashtags_from_content,
     _find_content_element,
     _input_tags,
     _navigate_to_publish_page,
@@ -79,7 +80,7 @@ def fill_publish_video_form(page: Page, content: PublishVideoContent) -> dict[st
     upload_state = _upload_video(page, content.video_path)
 
     # 填写表单（不点击发布）
-    _fill_publish_video_form(
+    tag_state = _fill_publish_video_form(
         page,
         content.title,
         content.content,
@@ -98,7 +99,7 @@ def fill_publish_video_form(page: Page, content: PublishVideoContent) -> dict[st
         "filename_visible": upload_state["filename_visible"],
         "hd_detected": upload_state["hd_detected"],
         "title_filled": True,
-        "tags_requested": content.tags,
+        **tag_state,
         "cover_requested": bool(content.cover_path),
         "cover_applied": cover_applied,
         "visibility_requested": content.visibility or "公开可见",
@@ -275,8 +276,9 @@ def _fill_publish_video_form(
     tags: list[str],
     schedule_time: str | None,
     visibility: str,
-) -> None:
+) -> dict[str, list[str]]:
     """填写视频表单（不点击发布）。"""
+    content, tags = _extract_hashtags_from_content(content, tags)
     # 标题
     page.input_text(TITLE_INPUT, title)
     time.sleep(1)
@@ -289,8 +291,7 @@ def _fill_publish_video_form(
     time.sleep(1)
     page.click_element(TITLE_INPUT)
 
-    if tags:
-        _input_tags(page, content_selector, tags)
+    tags_associated = _input_tags(page, content_selector, tags) if tags else []
     time.sleep(1)
 
     # 定时发布
@@ -301,6 +302,11 @@ def _fill_publish_video_form(
     _set_visibility(page, visibility)
 
     logger.info("视频表单填写完成，等待确认发布")
+    return {
+        "tags_requested": tags,
+        "tags_associated": tags_associated,
+        "tags_unassociated": [],
+    }
 
 
 def _js_str(s: str) -> str:

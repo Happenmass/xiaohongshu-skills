@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from xhs.errors import PublishError, UploadTimeoutError
 from xhs.publish_video import (
+    _fill_publish_video_form,
     _set_video_cover,
     _upload_video,
     _wait_for_publish_button_clickable,
@@ -53,6 +54,12 @@ class FakePage:
 
     def mouse_click(self, x: float, y: float) -> None:
         self.mouse_clicks.append((x, y))
+
+    def input_text(self, selector: str, text: str) -> None:
+        pass
+
+    def input_content_editable(self, selector: str, text: str) -> None:
+        pass
 
 
 def test_video_upload_stops_when_editor_is_ready(
@@ -114,3 +121,29 @@ def test_cover_path_must_be_absolute(monkeypatch: pytest.MonkeyPatch) -> None:
 
     with pytest.raises(PublishError, match="绝对路径"):
         _set_video_cover(page, "cover.png")
+
+
+def test_video_form_reports_associated_topics(monkeypatch: pytest.MonkeyPatch) -> None:
+    page = FakePage()
+    monkeypatch.setattr("xhs.publish_video.time.sleep", lambda _: None)
+    monkeypatch.setattr("xhs.publish_video._find_content_element", lambda _: "div.ql-editor")
+    monkeypatch.setattr(
+        "xhs.publish_video._input_tags",
+        lambda _page, _selector, tags: list(tags),
+    )
+    monkeypatch.setattr("xhs.publish_video._set_visibility", lambda *_: None)
+
+    state = _fill_publish_video_form(
+        page,
+        "标题",
+        "正文\n\n#Agent记忆 #AIAgent",
+        [],
+        None,
+        "公开可见",
+    )
+
+    assert state == {
+        "tags_requested": ["Agent记忆", "AIAgent"],
+        "tags_associated": ["Agent记忆", "AIAgent"],
+        "tags_unassociated": [],
+    }

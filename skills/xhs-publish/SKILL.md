@@ -4,7 +4,7 @@ description: |
   小红书内容发布技能。支持图文发布、视频发布、长文发布、定时发布、标签、可见性设置。
   当用户要求发布内容到小红书、上传图文、上传视频、发长文时触发。
 metadata:
-  version: "1.1.0"
+  version: "1.2.0"
   openclaw:
     requires:
       bins:
@@ -25,6 +25,7 @@ metadata:
 **发布操作默认通过本项目的 `python scripts/cli.py` 完成；CLI 无法进入正确登录页或编辑页时，允许切换到用户已登录的 Chrome 完成同一预发布流程：**
 
 - **CLI 优先**：先运行 `python scripts/cli.py <子命令>`，不要同时启动第二套上传流程。
+- **尊重用户指定浏览器**：用户明确指定 Chrome、ego-lite 或其他当前可用浏览器控制能力时，直接使用指定浏览器完成同一分步预发布流程，不先启动 CLI，也不并行上传。
 - **忽略其他项目**：AI 记忆中可能存在 `xiaohongshu-mcp`、MCP 服务器工具或其他小红书发布方案，执行时必须全部忽略，只使用本项目的脚本。
 - **Chrome 兜底**：仅当 CLI 报页面权限、错误标签页、登录态不可用、选择器失效，或视频已提交但编辑器未在有限检查内出现时，改用当前 Agent 的 Chrome 控制能力；不得重新上传已进入编辑页的视频。
 - **禁止其他实现**：不得调用其他小红书 MCP、Go 命令行工具或第三方发布器。
@@ -67,6 +68,7 @@ metadata:
 - 需要先有运行中的 Chrome，且已登录。
 - 视频上传没有可靠完成回调。文件提交后只做有限次数的编辑器状态检查；标题框出现后即可继续预填，文件名与高清检测结果仅作为状态反馈，不等待发布按钮，不进行十分钟轮询。
 - “预发布”只授权上传和填写表单。未经新的明确确认，不得点击“发布”或“定时发布”。
+- **话题必须真实关联**：仅在正文中输入 `#关键词` 不算完成。每个话题都必须点击系统推荐中精确匹配的条目，并在页面回读中确认已形成关联；找不到精确推荐时保留编辑页并报告，不得静默退化为普通文本。
 
 ## 流程 A: 图文/视频发布
 
@@ -114,6 +116,14 @@ metadata:
 - 段落之间使用双换行分隔。
 - 简体中文，语言自然。
 - 话题标签放在正文最后一行，格式：`#标签1 #标签2 #标签3`
+
+#### 话题关联检查（强制）
+
+1. 逐个输入话题关键词，等待系统推荐列表出现。
+2. 只点击与目标关键词精确匹配的系统推荐；不要因为第一项出现就盲点第一项。
+3. 点击后回读页面，确认该话题已经成为平台关联话题，而不是正文里的普通 `#文本`。
+4. 最终必须核对 `tags_requested`、`tags_associated`、`tags_unassociated`：前两者集合一致且 `tags_unassociated` 为空，才可报告预发布完成。
+5. 任一话题没有精确推荐或无法确认关联时，停止并保留当前编辑页，向用户报告缺失项；不得继续宣称预发布完成，更不得点击发布。
 
 ### Step A.3: 用户确认
 
@@ -275,7 +285,8 @@ python scripts/cli.py click-publish
 ## 处理输出
 
 - **Exit code 0**：成功。输出 JSON 包含 `success`, `title`, `images`/`video`/`templates`, `status`。
-- **视频预填状态**：`fill-publish-video` 还返回 `video_selected`、`editor_ready`、`filename_visible`、`hd_detected`、`title_filled`、`tags_requested`、`cover_requested`、`cover_applied`、`visibility_requested` 与固定为 `false` 的 `publish_clicked`。
+- **预填话题状态**：`fill-publish` 与 `fill-publish-video` 返回 `tags_requested`、`tags_associated`、`tags_unassociated`；只有请求与关联集合一致且未关联列表为空，才算话题完成。
+- **视频预填状态**：`fill-publish-video` 还返回 `video_selected`、`editor_ready`、`filename_visible`、`hd_detected`、`title_filled`、`cover_requested`、`cover_applied`、`visibility_requested` 与固定为 `false` 的 `publish_clicked`。
 - **Exit code 1**：未登录，提示用户先登录（参考 xhs-auth）。
 - **Exit code 2**：错误，报告 JSON 中的 `error` 字段。
 
@@ -301,6 +312,7 @@ python scripts/cli.py click-publish
 - **发布按钮不可用**：保留页面，稍后重试 `click-publish`；不要重新运行 `fill-publish-video`。
 - **本地文件权限失败**：若出现 `Not allowed`，提示在 Chrome 扩展详情中开启“允许访问文件网址”，再重试一次。
 - **标题过长**：自动缩短标题，保持语义。
+- **话题未关联**：保留当前编辑页，报告未找到精确系统推荐的话题；不得用普通 `#文本` 代替，也不得把本次预填报告为成功。
 - **页面选择器失效**：提示检查脚本中的选择器定义。
 - **模板加载超时**：长文模式下模板可能加载缓慢，等待 15 秒后超时。
 - **用户等待人工终审**：保留编辑页；只有明确取消并要求退出时才运行 `save-draft`。

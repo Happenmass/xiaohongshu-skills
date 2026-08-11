@@ -28,7 +28,6 @@ from .selectors import (
     POPOVER,
     PUBLISH_BUTTON,
     SCHEDULE_SWITCH,
-    TAG_FIRST_ITEM,
     TAG_TOPIC_CONTAINER,
     TITLE_INPUT,
     TITLE_MAX_SUFFIX,
@@ -41,6 +40,9 @@ from .types import PublishImageContent
 from .urls import PUBLISH_URL
 
 logger = logging.getLogger(__name__)
+
+TAG_SUGGESTION_ATTEMPTS = 6
+TAG_SUGGESTION_INTERVAL = 0.5
 
 
 def publish_image_content(page: Page, content: PublishImageContent) -> None:
@@ -60,7 +62,7 @@ def publish_image_content(page: Page, content: PublishImageContent) -> None:
     click_publish_button(page)
 
 
-def fill_publish_form(page: Page, content: PublishImageContent) -> None:
+def fill_publish_form(page: Page, content: PublishImageContent) -> dict[str, object]:
     """填写图文发布表单，不点击发布按钮。
 
     Args:
@@ -102,7 +104,7 @@ def fill_publish_form(page: Page, content: PublishImageContent) -> None:
     )
 
     # 填写表单（不点击发布）
-    _fill_publish_form(
+    tags_requested, tags_associated = _fill_publish_form(
         page,
         content.title,
         content.content,
@@ -111,6 +113,11 @@ def fill_publish_form(page: Page, content: PublishImageContent) -> None:
         content.is_original,
         content.visibility,
     )
+    return {
+        "tags_requested": tags_requested,
+        "tags_associated": tags_associated,
+        "tags_unassociated": [],
+    }
 
 
 def click_publish_button(page: Page) -> None:
@@ -528,7 +535,7 @@ def _fill_publish_form(
     schedule_time: str | None,
     is_original: bool,
     visibility: str,
-) -> None:
+) -> tuple[list[str], list[str]]:
     """填写表单（不点击发布）。"""
     # 从正文末尾提取 hashtag 并合并到 tags
     content, tags = _extract_hashtags_from_content(content, tags)
@@ -556,8 +563,7 @@ def _fill_publish_form(
     logger.info("已回点标题输入框")
 
     # 标签
-    if tags:
-        _input_tags(page, content_selector, tags)
+    tags_associated = _input_tags(page, content_selector, tags) if tags else []
     time.sleep(1)
     _check_content_max_length(page)
     logger.info("正文长度检查通过")
@@ -578,6 +584,7 @@ def _fill_publish_form(
             logger.warning("设置原创声明失败: %s", e)
 
     logger.info("表单填写完成，等待确认发布")
+    return tags, tags_associated
 
 
 def _find_content_element(page: Page) -> str:
@@ -636,8 +643,8 @@ def _check_content_max_length(page: Page) -> None:
 # ========== 标签输入 ==========
 
 
-def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
-    """输入标签。"""
+def _input_tags(page: Page, content_selector: str, tags: list[str]) -> list[str]:
+    """逐个选择系统推荐话题；不允许退化为普通 ``#文本``。"""
     time.sleep(1)
 
     # 先记录当前段落数（insertParagraph 之前），之后用于精确定位正文最后一段
@@ -666,9 +673,15 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
     )
     time.sleep(0.5)
 
-    for tag in tags:
-        tag = tag.lstrip("#")
-        _input_single_tag(page, content_selector, tag)
+    associated: list[str] = []
+    for raw_tag in tags:
+        tag = raw_tag.lstrip("#")
+        if not _input_single_tag(page, content_selector, tag):
+            raise PublishError(
+                f"话题 #{tag} 未找到精确匹配的系统推荐，未完成关联。"
+                "请保留当前编辑页，人工选择正确推荐话题；不要把普通 #文本视为已关联。"
+            )
+        associated.append(tag)
 
     # 输入完所有 tags 后，回到正文最后一段（tags 输入前的最后一段）末尾，按下回车
     # 用 para_count_before 精确定位，避免 tags 输入后 Quill 自动新增空段导致偏移
@@ -693,10 +706,11 @@ def _input_tags(page: Page, content_selector: str, tags: list[str]) -> None:
         """
     )
     time.sleep(0.3)
+    return associated
 
 
-def _input_single_tag(page: Page, content_selector: str, tag: str) -> None:
-    """输入单个标签。"""
+def _input_single_tag(page: Page, content_selector: str, tag: str) -> bool:
+    """输入单个标签并点击精确匹配的系统推荐项。"""
     # 输入 #
     page.type_text("#", delay_ms=0)
     time.sleep(0.3)
@@ -706,25 +720,40 @@ def _input_single_tag(page: Page, content_selector: str, tag: str) -> None:
         page.type_text(char, delay_ms=0)
         time.sleep(random.uniform(0.05, 0.12))
 
-    # 等待标签联想出现（最多 3 秒）
-    deadline = time.monotonic() + 3.0
-    clicked = False
-    while time.monotonic() < deadline:
-        time.sleep(0.5)
-        if page.has_element(TAG_TOPIC_CONTAINER):
-            item_selector = f"{TAG_TOPIC_CONTAINER} {TAG_FIRST_ITEM}"
-            if page.has_element(item_selector):
-                page.click_element(item_selector)
-                logger.info("点击标签联想: %s", tag)
-                clicked = True
-                break
+    # 只点击与请求关键词精确匹配的系统推荐，不能盲点第一项。
+    for attempt in range(TAG_SUGGESTION_ATTEMPTS):
+        point = page.evaluate(
+            f"""
+            (() => {{
+                const container = document.querySelector({json.dumps(TAG_TOPIC_CONTAINER)});
+                if (!container) return null;
+                const target = {json.dumps(tag)}.trim().replace(/^#/, '').toLocaleLowerCase();
+                const items = Array.from(container.querySelectorAll('.item'));
+                const exact = items.find((item) => {{
+                    const firstLine = (item.innerText || item.textContent || '')
+                        .split('\\n')[0]
+                        .trim()
+                        .replace(/^#/, '')
+                        .toLocaleLowerCase();
+                    return firstLine === target;
+                }});
+                if (!exact) return null;
+                const rect = exact.getBoundingClientRect();
+                if (rect.width === 0 || rect.height === 0) return null;
+                return {{x: rect.left + rect.width / 2, y: rect.top + rect.height / 2}};
+            }})()
+            """
+        )
+        if isinstance(point, dict):
+            page.mouse_click(float(point["x"]), float(point["y"]))
+            logger.info("已点击精确匹配的话题推荐: #%s", tag)
+            time.sleep(0.8)
+            return True
+        if attempt < TAG_SUGGESTION_ATTEMPTS - 1:
+            time.sleep(TAG_SUGGESTION_INTERVAL)
 
-    if not clicked:
-        # 没有联想，直接空格
-        logger.warning("未找到标签联想，直接输入空格: %s", tag)
-        page.type_text(" ", delay_ms=0)
-
-    time.sleep(0.8)
+    logger.warning("未找到精确匹配的话题推荐: #%s", tag)
+    return False
 
 
 # ========== 定时发布 ==========
